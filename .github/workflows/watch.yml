@@ -51,12 +51,19 @@ jobs:
     timeout-minutes: 350
 
     steps:
-      - name: Exit if a shift is already running
+      # Everything cheap happens here, before checkout and pip install, so a
+      # firing that has nothing to do costs ~10 seconds instead of ~2 minutes.
+      # At one firing every 5 minutes that difference is most of a runner-day.
+      - name: Decide whether to start a shift
         id: guard
         env:
           GH_TOKEN: ${{ github.token }}
+          HAS_SESSIONID: ${{ secrets.IG_SESSIONID != '' }}
+          HAS_PASSWORD: ${{ secrets.IG_USERNAME != '' && secrets.IG_PASSWORD != '' }}
+          TOPIC: ${{ secrets.NTFY_TOPIC || env.DEFAULT_NTFY_TOPIC }}
         run: |
           set -euo pipefail
+
           running=$(gh api \
             "repos/${GITHUB_REPOSITORY}/actions/workflows/watch.yml/runs?status=in_progress&per_page=100" \
             --jq '[.workflow_runs[].id] | length')
@@ -65,9 +72,39 @@ jobs:
           if [ "$running" -gt 1 ]; then
             echo "another shift is active — nothing to do"
             echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+
+          if [ "$HAS_SESSIONID" != "true" ] && [ "$HAS_PASSWORD" != "true" ]; then
+            echo "::warning::No Instagram sign-in configured. Add a repository secret named IG_SESSIONID — see RUN_ON_GITHUB.md."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+
+            # Nudge the phone, but not 288 times a day: roughly every 6 hours,
+            # plus once whenever somebody presses Run workflow by hand.
+            hour=$(date -u +%-H); minute=$(date -u +%-M)
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ] \
+               || { [ $((hour % 6)) -eq 0 ] && [ "$minute" -lt 5 ]; }; then
+              secrets_url="https://github.com/${GITHUB_REPOSITORY}/settings/secrets/actions/new"
+              guide_url="https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/RUN_ON_GITHUB.md"
+              printf '%s' "{
+                \"topic\": \"${TOPIC}\",
+                \"title\": \"⚙️ Almost there — 1 step left\",
+                \"message\": \"Your @zero2sudo watcher is deployed and running on GitHub. It just needs to be signed in to Instagram — stories are invisible to logged-out visitors.\\n\\nOn a desktop:\\n1. Log in to instagram.com\\n2. F12 → Application → Cookies → instagram.com\\n3. Copy the value of the sessionid cookie\\n4. Tap below, name the secret IG_SESSIONID, paste, save\\n\\nNotifications start within ~5 minutes of saving it.\",
+                \"priority\": 4,
+                \"tags\": [\"gear\"],
+                \"click\": \"${secrets_url}\",
+                \"actions\": [
+                  {\"action\": \"view\", \"label\": \"Add the secret\", \"url\": \"${secrets_url}\"},
+                  {\"action\": \"view\", \"label\": \"Instructions\", \"url\": \"${guide_url}\"}
+                ]
+              }" | curl -sS --max-time 20 -X POST https://ntfy.sh -H "Content-Type: application/json" -d @- \
+                && echo "reminder pushed to the phone" || echo "could not reach ntfy"
+            fi
+            exit 0
+          fi
+
+          echo "credentials present — starting a shift"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
         if: steps.guard.outputs.skip != 'true'
@@ -82,9 +119,6 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         run: pip install -r requirements.txt
 
-      # Is an Instagram session configured yet? If not, nudge the phone with
-      # the remaining step rather than failing into a log nobody reads.
-      # Rate limited to roughly every 6 hours, plus once on a manual run.
       - name: Preflight
         id: preflight
         if: steps.guard.outputs.skip != 'true'
@@ -98,22 +132,7 @@ jobs:
           NOTIFY_BACKEND: ntfy
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC || env.DEFAULT_NTFY_TOPIC }}
         run: |
-          set +e
-          hour=$(date -u +%-H); minute=$(date -u +%-M)
-          quiet="--quiet"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            quiet=""
-          elif [ $((hour % 6)) -eq 0 ] && [ "$minute" -lt 5 ]; then
-            quiet=""
-          fi
-          python -m insta_notify preflight $quiet
-          code=$?
-          if [ "$code" -eq 2 ]; then
-            echo "::warning::Waiting on IG_SESSIONID. Add it at Settings > Secrets and variables > Actions."
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          [ "$code" -ne 0 ] && exit "$code"
+          python -m insta_notify preflight --quiet
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
       # Carries the dedup database and Instagram session between shifts.

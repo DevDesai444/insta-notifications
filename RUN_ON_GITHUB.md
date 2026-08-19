@@ -116,6 +116,10 @@ arrives within ~60 seconds.
   repo private (you get 2,000 free minutes/month, which is *not* enough for
   24/7 — you'd need to fall back to a 5-minute cron) or just revoke the
   session when you're done.
+- **ntfy.sh's free tier has a daily message cap per publishing IP** (and
+  attachments expire after 3 hours). Each Actions run publishes from a fresh
+  runner IP, so this won't bite you — but it's why a self-hosted or paid ntfy
+  is the answer if you ever fan this out to many accounts.
 - **GitHub asks that Actions be used for work related to the project.** A
   permanently-running watcher is a gray area, and heavy scheduled usage can
   get throttled. If this matters to you, the `docker compose up -d` path on
