@@ -71,21 +71,29 @@ public.
 
 ---
 
-## 4. Nothing — it's already running
+## 4. Nothing — it's already deployed
 
-The watcher is deployed and its schedule is live. It polls every 5 minutes to
-see whether a shift should start, and starts watching the moment
-`IG_SESSIONID` exists.
+The watcher is live and has already run. With no credentials it finishes in
+about 4 seconds, having skipped everything, and it will keep doing that until
+`IG_SESSIONID` exists. Every few hours it pushes a reminder to your phone
+with a link straight to the form above.
 
-Until then it pushes a reminder to your phone every few hours with a direct
-link to the form above. **If you got a notification saying "Almost there — 1
-step left", the whole delivery chain already works** — the only missing piece
-is that cookie.
+**If you got a notification saying "Almost there — 1 step left", the whole
+delivery chain already works.** The only missing piece is that cookie.
 
-Once the secret is saved, notifications begin within about 5 minutes.
+Once the secret is saved, the next firing starts a real 5h30m watch shift.
 
-To watch it happen: **Actions** tab → **watch instagram** → open the running
-job.
+### If nothing happens within ~15 minutes of saving the secret
+
+GitHub's scheduler is unreliable with newly added crons — during this project
+it went 25 minutes without firing a `*/5` schedule even once. Give it a
+nudge by hand:
+
+**Actions** tab → **watch instagram** → **Run workflow** → **Run workflow**.
+
+That starts a shift immediately, and also sends you the setup reminder again
+so you can confirm the notification path. Pushing any commit to the default
+branch does the same thing.
 
 ---
 
