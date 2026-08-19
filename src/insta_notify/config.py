@@ -56,6 +56,10 @@ class Config:
     ig_username: str = ""
     ig_password: str = ""
     ig_verification_code: str = ""  # TOTP seed for 2FA, optional
+    # Preferred over username/password: paste the `sessionid` cookie from a
+    # browser you're already logged into. No password ever touches disk, and
+    # no throwaway account needs creating.
+    ig_sessionid: str = ""
 
     # --- polling ------------------------------------------------------
     poll_interval: int = 60
@@ -109,6 +113,10 @@ class Config:
         return self.data_dir / "media"
 
     @property
+    def has_instagram_auth(self) -> bool:
+        return bool(self.ig_sessionid or (self.ig_username and self.ig_password))
+
+    @property
     def use_vision(self) -> bool:
         return self.vision_enabled and bool(self.anthropic_api_key)
 
@@ -129,6 +137,7 @@ class Config:
             ig_username=os.getenv("IG_USERNAME", ""),
             ig_password=os.getenv("IG_PASSWORD", ""),
             ig_verification_code=os.getenv("IG_TOTP_SEED", ""),
+            ig_sessionid=os.getenv("IG_SESSIONID", "").strip().strip('"').strip("'"),
             poll_interval=_int("POLL_INTERVAL_SECONDS", 60),
             poll_jitter=_float("POLL_JITTER", 0.2),
             posts_per_poll=_int("POSTS_PER_POLL", 5),
@@ -158,11 +167,13 @@ class Config:
         problems: list[str] = []
         if not self.target_username:
             problems.append("IG_TARGET_USERNAME is empty.")
-        if self.check_stories and not (self.ig_username and self.ig_password):
+        if self.check_stories and not self.has_instagram_auth:
             problems.append(
-                "IG_USERNAME/IG_PASSWORD are required to read stories. "
-                "Use a throwaway Instagram account that follows "
-                f"@{self.target_username}."
+                "Instagram sign-in is required to read stories. Set either "
+                "IG_SESSIONID (paste the `sessionid` cookie from a browser "
+                "you're logged into — easiest, no password stored) or "
+                "IG_USERNAME + IG_PASSWORD. Whichever account you use must "
+                f"follow @{self.target_username}."
             )
         if self.backend == "ntfy" and not self.ntfy_topic:
             problems.append("NTFY_TOPIC is required when NOTIFY_BACKEND=ntfy.")

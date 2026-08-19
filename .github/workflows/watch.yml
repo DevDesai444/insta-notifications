@@ -1,0 +1,105 @@
+# 24/7 watcher running on GitHub's free runners — no machine of your own.
+#
+# How it stays up without a server:
+#   * A job here can run up to 6 hours, so each run polls for 5h30m.
+#   * A cron fires every 5 minutes. If a run is already going, the new one
+#     exits in ~15 seconds. If none is going, it starts the next 5h30m shift.
+#   * State (what's already been notified, plus the Instagram session) rides
+#     between runs in the Actions cache.
+#
+# Setup is in RUN_ON_GITHUB.md. You need two repository secrets:
+#   NTFY_TOPIC     your private ntfy topic
+#   IG_SESSIONID   the `sessionid` cookie from a logged-in browser
+# and optionally ANTHROPIC_API_KEY to read links out of screenshots.
+
+name: watch instagram
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: "How long this run should watch for"
+        default: "5h30m"
+        required: false
+  schedule:
+    # Every 5 minutes. Almost all of these exit immediately because a shift
+    # is already running; they exist to start the next one promptly.
+    - cron: "*/5 * * * *"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    # 5h30m of watching, plus room for setup and the cache save.
+    timeout-minutes: 350
+
+    steps:
+      - name: Exit if a shift is already running
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          running=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/watch.yml/runs?status=in_progress&per_page=100" \
+            --jq '[.workflow_runs[].id] | length')
+          echo "in-progress runs (including this one): $running"
+          # This run counts itself, so >1 means somebody else is already on shift.
+          if [ "$running" -gt 1 ]; then
+            echo "another shift is active — nothing to do"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.guard.outputs.skip != 'true'
+
+      - uses: actions/setup-python@v5
+        if: steps.guard.outputs.skip != 'true'
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        if: steps.guard.outputs.skip != 'true'
+        run: pip install -r requirements.txt
+
+      # Carries the dedup database and Instagram session between shifts.
+      # Without it every shift would re-notify and re-login.
+      - name: Restore state
+        if: steps.guard.outputs.skip != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: insta-state-${{ github.run_id }}
+          restore-keys: |
+            insta-state-
+
+      - name: Watch
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          PYTHONPATH: src
+          DATA_DIR: data
+          IG_TARGET_USERNAME: zero2sudo
+          IG_SESSIONID: ${{ secrets.IG_SESSIONID }}
+          IG_USERNAME: ${{ secrets.IG_USERNAME }}
+          IG_PASSWORD: ${{ secrets.IG_PASSWORD }}
+          NOTIFY_BACKEND: ntfy
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          POLL_INTERVAL_SECONDS: "60"
+          NOTIFY_ALL: "true"
+        run: |
+          python -m insta_notify run --duration "${{ inputs.duration || '5h30m' }}"
+
+      # `always()` so a cancelled or timed-out shift still hands its state on.
+      - name: Save state
+        if: always() && steps.guard.outputs.skip != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: data
+          key: insta-state-${{ github.run_id }}

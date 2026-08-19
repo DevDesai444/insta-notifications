@@ -1,4 +1,6 @@
-from insta_notify.runner import MAX_BACKOFF, Runner
+import pytest
+
+from insta_notify.runner import MAX_BACKOFF, Runner, parse_duration
 
 
 class DummyPipeline:
@@ -72,3 +74,66 @@ def test_stop_request_ends_the_loop():
     r.request_stop()
     r.run_forever()
     assert pipeline.calls == 0
+
+
+class TestDurationParsing:
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            ("5h30m", 19800.0),
+            ("90m", 5400.0),
+            ("2h", 7200.0),
+            ("1d", 86400.0),
+            ("45s", 45.0),
+            ("3600", 3600.0),
+            (3600, 3600.0),
+            ("", None),
+            (None, None),
+            ("0", None),
+        ],
+    )
+    def test_parses(self, text, expected):
+        assert parse_duration(text) == expected
+
+    def test_rejects_nonsense(self):
+        with pytest.raises(ValueError):
+            parse_duration("banana")
+
+
+class TestDurationStopsTheLoop:
+    def test_loop_exits_once_the_duration_elapses(self):
+        import time
+
+        pipeline = DummyPipeline([0] * 500)
+        r = Runner(pipeline, interval=20, jitter=0, duration=0.15)
+        # Compress the 20s interval to 10ms so the test runs fast but time
+        # still advances, letting the deadline actually arrive.
+        r._stop.wait = lambda _d: time.sleep(0.01)
+
+        started = time.monotonic()
+        r.run_forever()
+        elapsed = time.monotonic() - started
+
+        assert 0 < pipeline.calls < 500, "should stop early, not drain the script"
+        assert elapsed < 1.0, "should have stopped at ~0.15s"
+
+    def test_no_duration_means_no_deadline(self):
+        r = Runner(DummyPipeline([]), interval=20, jitter=0)
+        assert r.duration is None
+        assert r.time_left is None
+
+    def test_sleep_is_clipped_to_the_deadline(self):
+        """A 60s interval must not overshoot a deadline 2s away."""
+        import time
+
+        pipeline = DummyPipeline([0, 0])
+        r = Runner(pipeline, interval=60, jitter=0, duration=2)
+        slept = []
+        r._stop.wait = lambda d: slept.append(d)
+        r._deadline = time.monotonic() + 2
+        r.duration = 2
+
+        # one manual iteration of the loop body
+        r.pipeline.poll_once()
+        delay = min(r.next_delay(), r._deadline - time.monotonic())
+        assert delay <= 2, "would have slept 60s past a 2s deadline"

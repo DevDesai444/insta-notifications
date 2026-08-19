@@ -8,7 +8,11 @@ Safari.
 Built so you can **delete Instagram from your phone** and still not miss a
 posting.
 
-**→ [SETUP.md](SETUP.md) gets you notifications in about 10 minutes.**
+**Start here:**
+- **No machine that stays on?** → **[RUN_ON_GITHUB.md](RUN_ON_GITHUB.md)** —
+  runs 24/7 on GitHub's free runners, ~5 minutes of setup, all in the browser.
+- **Got a laptop / Pi / VPS that's always on?** → **[SETUP.md](SETUP.md)** —
+  `python -m insta_notify quickstart` and you're going.
 
 ---
 
@@ -88,6 +92,18 @@ a nice-to-have if most of what you care about arrives as stories.
                           └──────────────────────────────┘
 ```
 
+### Signing in without handing over a password
+
+Stories are invisible to logged-out visitors, so the watcher has to be signed
+in — and anonymous access to public posts is dead too (Instagram 429s it from
+anything that isn't a residential IP; verified while building this).
+
+Rather than demanding a throwaway account, `IG_SESSIONID` takes the
+`sessionid` cookie from a browser you're already logged into. No password
+touches disk, nothing new to register, and you can kill it instantly from
+Instagram's "Where you're logged in" screen. Username/password still works if
+you prefer a throwaway account.
+
 ### Why polling, and what "real time" means here
 
 Instagram has no public API and no webhook for someone else's account, so
@@ -115,11 +131,13 @@ tappable link instead of three, with the rest listed in the body.
 ## Commands
 
 ```bash
-python -m insta_notify selftest   # send a test push — verify your phone first
-python -m insta_notify doctor     # check config, log in, list recent posts
-python -m insta_notify login      # log in to Instagram, save the session
+python -m insta_notify quickstart # ← start here: writes .env, verifies your phone
+python -m insta_notify selftest   # send a test push
+python -m insta_notify doctor     # check config, sign in, list recent posts
+python -m insta_notify login      # sign in to Instagram and save the session
 python -m insta_notify demo       # two fake notifications, no Instagram needed
 python -m insta_notify run        # watch continuously  ← the daemon
+python -m insta_notify run --duration 5h30m   # stop cleanly after a while
 python -m insta_notify once       # single poll, then exit (for cron)
 ```
 
@@ -135,7 +153,8 @@ annotated list. The ones that matter most:
 | Variable | Default | What it does |
 |---|---|---|
 | `IG_TARGET_USERNAME` | `zero2sudo` | Account to watch |
-| `IG_USERNAME` / `IG_PASSWORD` | — | **Throwaway** account that follows the target |
+| `IG_SESSIONID` | — | `sessionid` cookie from a logged-in browser. **Easiest** — no new account, no password stored |
+| `IG_USERNAME` / `IG_PASSWORD` | — | Alternative to the cookie. Use a throwaway account |
 | `NTFY_TOPIC` | — | Your private ntfy topic. Make it unguessable |
 | `ANTHROPIC_API_KEY` | — | Enables reading links out of images |
 | `POLL_INTERVAL_SECONDS` | `60` | How often to check |
@@ -153,15 +172,16 @@ would drop exactly the ones worth seeing.
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest -q          # 85 tests
+python -m pytest -q          # 109 tests
 python -m insta_notify demo  # end-to-end with the console backend
 ```
 
 Tests cover URL extraction and Instagram redirect unwrapping, dedup and
-persistence across restarts, first-run seeding, retry-on-send-failure, the
-vision merge path, the ntfy payload against the documented JSON schema, and
-the instagrapi field mappings (those last ones skip if instagrapi isn't
-installed).
+persistence across restarts, first-run seeding (including the empty-first-poll
+and failed-first-poll cases that used to swallow the first real post),
+retry-on-send-failure, duration-bounded runs, the vision merge path, the ntfy
+payload against the documented JSON schema, and the instagrapi field mappings
+and device profile (those last ones skip if instagrapi isn't installed).
 
 ---
 

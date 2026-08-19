@@ -54,38 +54,43 @@ class Pipeline:
     def poll_once(self) -> int:
         """Run one full cycle. Returns the number of notifications sent."""
         self._vision_budget = self.cfg.vision_max_per_poll
-        items = self._collect()
+        items, reached_instagram = self._collect()
 
-        fresh = [
-            item
-            for item in items
-            if not self.state.has_seen(item.item_id)
-            and item.age_seconds <= self.cfg.max_item_age_hours * 3600
-        ]
+        # A poll where every fetch errored tells us nothing. Returning here
+        # keeps a failed first poll from being mistaken for "nothing is
+        # posted", which would arm the seed below against real content.
+        if not reached_instagram:
+            return 0
+
+        cutoff = self.cfg.max_item_age_hours * 3600
+        unseen = [i for i in items if not self.state.has_seen(i.item_id)]
+        fresh = [i for i in unseen if i.age_seconds <= cutoff]
 
         # Mark items that are too old anyway, so we never look at them again.
-        stale = [
-            (i.item_id, i.kind)
-            for i in items
-            if not self.state.has_seen(i.item_id)
-            and i.age_seconds > self.cfg.max_item_age_hours * 3600
-        ]
+        stale = [(i.item_id, i.kind) for i in unseen if i.age_seconds > cutoff]
         if stale:
             self.state.mark_many(stale)
 
-        if not fresh:
-            return 0
-
-        # First ever run: remember what's already up rather than firing a
-        # burst of notifications for content the user has likely seen.
+        # First successful poll: remember what's already up rather than firing
+        # a burst of notifications for content the user has likely seen.
+        #
+        # This has to run even when `fresh` is empty. An account with no story
+        # currently up gives a first poll with nothing in it; if the flag
+        # weren't set here, the next genuinely new post would be treated as
+        # first-run content and silently swallowed instead of pushed — which
+        # looks exactly like the watcher never starting.
         if self.cfg.seed_on_first_run and self.state.get_meta(_SEEDED_KEY) != "1":
-            self.state.mark_many([(i.item_id, i.kind) for i in fresh])
+            if fresh:
+                self.state.mark_many([(i.item_id, i.kind) for i in fresh])
             self.state.set_meta(_SEEDED_KEY, "1")
             log.info(
                 "first run: recorded %d existing item(s) without notifying. "
-                "New content from here on will be pushed.",
+                "Anything posted from now on gets pushed.",
                 len(fresh),
             )
+            return 0
+
+        if not fresh:
             return 0
 
         fresh.sort(key=lambda i: i.taken_at)
@@ -102,19 +107,33 @@ class Pipeline:
         media_utils.cleanup(self.cfg.media_dir)
         return sent
 
-    def _collect(self) -> list[Item]:
+    def _collect(self) -> tuple[list[Item], bool]:
+        """Everything currently visible, plus whether we heard from Instagram.
+
+        The flag distinguishes "he has posted nothing" from "the fetch blew
+        up", which are the same empty list but must not be treated alike.
+        """
         items: list[Item] = []
+        attempted = 0
+        succeeded = 0
+
         if self.cfg.check_stories:
+            attempted += 1
             try:
                 items.extend(self.source.fetch_stories())
+                succeeded += 1
             except Exception as exc:
                 log.error("could not fetch stories: %s", exc)
+
         if self.cfg.check_posts:
+            attempted += 1
             try:
                 items.extend(self.source.fetch_posts(limit=self.cfg.posts_per_poll))
+                succeeded += 1
             except Exception as exc:
                 log.error("could not fetch posts: %s", exc)
-        return items
+
+        return items, (succeeded > 0 or attempted == 0)
 
     # --------------------------------------------------------------- process
 

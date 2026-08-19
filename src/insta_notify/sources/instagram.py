@@ -56,11 +56,12 @@ def _apply_device(client, device: dict) -> None:
 class InstagramSource(Source):
     def __init__(
         self,
-        username: str,
-        password: str,
-        target: str,
-        session_file: Path,
+        username: str = "",
+        password: str = "",
+        target: str = "",
+        session_file: Path | str = "session.json",
         totp_seed: str = "",
+        sessionid: str = "",
         request_delay: tuple[int, int] = (1, 3),
     ):
         self.username = username
@@ -68,9 +69,18 @@ class InstagramSource(Source):
         self.target = target.lstrip("@")
         self.session_file = Path(session_file)
         self.totp_seed = totp_seed
+        self.sessionid = sessionid
         self.request_delay = request_delay
         self._client = None
         self._target_id: str | None = None
+
+    @property
+    def auth_mode(self) -> str:
+        if self.sessionid:
+            return "sessionid"
+        if self.username and self.password:
+            return "password"
+        return "none"
 
     # ------------------------------------------------------------------ auth
 
@@ -97,34 +107,56 @@ class InstagramSource(Source):
         if not loaded:
             _apply_device(cl, DEVICE)
 
-        code = self._totp(cl)
+        if self.auth_mode == "none":
+            raise RuntimeError(
+                "No Instagram credentials. Set IG_SESSIONID (recommended) or "
+                "IG_USERNAME + IG_PASSWORD."
+            )
 
         if loaded:
             try:
-                cl.login(self.username, self.password, verification_code=code)
+                self._resume(cl)
                 cl.get_timeline_feed()  # proves the session is actually alive
-                log.info("reused saved Instagram session")
+                log.info("reused saved Instagram session (%s)", self.auth_mode)
             except LoginRequired:
-                log.info("saved session expired; logging in again")
-                self._relogin(cl)
+                log.info("saved session expired; signing in again")
+                self._fresh_login(cl)
             except Exception as exc:
-                log.warning("session check failed (%s); logging in again", exc)
-                self._relogin(cl)
+                log.warning("session check failed (%s); signing in again", exc)
+                self._fresh_login(cl)
         else:
-            cl.login(self.username, self.password, verification_code=code)
+            self._fresh_login(cl)
 
         self.session_file.parent.mkdir(parents=True, exist_ok=True)
         cl.dump_settings(self.session_file)
         self._client = cl
 
-    def _relogin(self, client) -> None:
-        """Drop the stale auth but keep the device and uuids we registered with."""
+    def _resume(self, client) -> None:
+        """Re-assert credentials over a restored session file."""
+        if self.auth_mode == "sessionid":
+            # The cookie in the session file may be stale; the configured one
+            # is the source of truth.
+            client.login_by_sessionid(self.sessionid)
+        else:
+            client.login(
+                self.username, self.password, verification_code=self._totp(client)
+            )
+
+    def _fresh_login(self, client) -> None:
+        """Drop stale auth but keep the device and uuids we registered with."""
         old = client.get_settings() or {}
         device = old.get("device_settings") or DEVICE
         client.set_settings({})
         client.set_uuids(old.get("uuids", {}))
         _apply_device(client, device)
-        client.login(self.username, self.password, verification_code=self._totp(client))
+
+        if self.auth_mode == "sessionid":
+            client.login_by_sessionid(self.sessionid)
+            log.info("signed in as @%s via session cookie", client.username)
+        else:
+            client.login(
+                self.username, self.password, verification_code=self._totp(client)
+            )
 
     def _totp(self, client) -> str:
         if not self.totp_seed:

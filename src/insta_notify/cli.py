@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import argparse
 import logging
+import secrets
 import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from .config import Config
 from .extract.vision import VisionExtractor
 from .models import Item, Notification
 from .notify import build_notifier
 from .pipeline import Pipeline
-from .runner import Runner
+from .runner import Runner, parse_duration
 from .sources.fake import FakeSource
 from .state import StateStore
 
@@ -42,6 +44,7 @@ def _build_source(cfg: Config, state: StateStore):
         target=cfg.target_username,
         session_file=cfg.session_file,
         totp_seed=cfg.ig_verification_code,
+        sessionid=cfg.ig_sessionid,
     )
     cached = state.get_meta(_TARGET_ID_KEY)
     if cached:
@@ -69,6 +72,12 @@ def _report_config(cfg: Config) -> bool:
     print(f"  backend         : {cfg.backend}")
     if cfg.backend == "ntfy":
         print(f"  ntfy topic      : {cfg.ntfy_server}/{cfg.ntfy_topic or '(unset)'}")
+    auth = (
+        "session cookie" if cfg.ig_sessionid
+        else f"password (@{cfg.ig_username})" if cfg.ig_username
+        else "NOT SET"
+    )
+    print(f"  instagram auth  : {auth}")
     print(f"  stories / posts : {cfg.check_stories} / {cfg.check_posts}")
     print(f"  image reading   : {'on (' + cfg.vision_model + ')' if cfg.use_vision else 'off'}")
     print(f"  data dir        : {cfg.data_dir.resolve()}")
@@ -221,6 +230,104 @@ def cmd_demo(cfg: Config, _args) -> int:
     return 0 if sent else 1
 
 
+QUICKSTART_TEMPLATE = """\
+# Written by `insta-notify quickstart`. Edit freely.
+
+IG_TARGET_USERNAME={target}
+
+# ── Instagram sign-in ────────────────────────────────────────────────────
+# Stories are invisible to logged-out visitors, so this is required.
+#
+# EASIEST (no new account, no password stored):
+#   1. Log in to instagram.com in a desktop browser
+#   2. DevTools (F12) > Application > Cookies > https://www.instagram.com
+#   3. Copy the value of the `sessionid` cookie and paste it below
+# Whatever account you use must FOLLOW @{target}.
+IG_SESSIONID=
+
+# Or, if you'd rather use a throwaway account's login:
+IG_USERNAME=
+IG_PASSWORD=
+IG_TOTP_SEED=
+
+# ── Where notifications go ───────────────────────────────────────────────
+NOTIFY_BACKEND=ntfy
+NTFY_TOPIC={topic}
+NTFY_SERVER=https://ntfy.sh
+NTFY_PRIORITY=5
+
+# ── Reading links out of screenshots (optional but recommended) ──────────
+# Catches Workday links that only exist as pixels in a story image.
+ANTHROPIC_API_KEY=
+VISION_ENABLED=true
+VISION_MODEL=claude-opus-5
+
+# ── Timing ───────────────────────────────────────────────────────────────
+POLL_INTERVAL_SECONDS=60
+NOTIFY_ALL=true
+DATA_DIR=data
+SEED_ON_FIRST_RUN=true
+"""
+
+
+def cmd_quickstart(cfg: Config, args) -> int:
+    """Write a .env with a generated topic and prove the phone works."""
+    env_path = Path(args.env_file or ".env")
+
+    if env_path.exists() and not args.force:
+        print(f"{env_path} already exists — leaving it alone.")
+        print("Re-run with --force to overwrite it.\n")
+        topic = cfg.ntfy_topic
+    else:
+        topic = cfg.ntfy_topic or f"{cfg.target_username}-{secrets.token_hex(5)}"
+        env_path.write_text(
+            QUICKSTART_TEMPLATE.format(target=cfg.target_username, topic=topic)
+        )
+        print(f"wrote {env_path}\n")
+
+    if not topic:
+        print("No NTFY_TOPIC set. Add one to .env and re-run.")
+        return 1
+
+    print("=" * 66)
+    print("  STEP 1 — on your iPhone")
+    print("=" * 66)
+    print("  1. Install 'ntfy' from the App Store (free)")
+    print("  2. Open it, allow notifications, tap + and subscribe to:\n")
+    print(f"        {topic}\n")
+    print("  3. iOS Settings > Notifications > ntfy:")
+    print("     turn OFF 'Scheduled Summary' (it would delay alerts by hours)")
+    print()
+    print(f"  Or just open this link on the phone:  https://ntfy.sh/{topic}")
+    print()
+
+    if args.no_test:
+        print("skipping the test push (--no-test)")
+    else:
+        try:
+            input("  Press Enter once you've subscribed, to send a test push… ")
+        except (EOFError, KeyboardInterrupt):
+            print()
+        cfg.ntfy_topic = topic
+        cfg.backend = "ntfy"
+        if cmd_selftest(cfg, args) != 0:
+            return 1
+        print()
+
+    print("=" * 66)
+    print("  STEP 2 — let it read Instagram")
+    print("=" * 66)
+    print(f"  Open {env_path} and set IG_SESSIONID (instructions are in the file).")
+    print("  Then:")
+    print("      insta-notify doctor      # verifies the login works")
+    print("      insta-notify run         # starts watching")
+    print()
+    print("  No machine that stays on? This repo ships a GitHub Actions")
+    print("  watcher that runs it 24/7 for free — see RUN_ON_GITHUB.md")
+    print()
+    return 0
+
+
 def cmd_once(cfg: Config, args) -> int:
     if args.no_seed:
         cfg.seed_on_first_run = False
@@ -248,6 +355,11 @@ def cmd_run(cfg: Config, args) -> int:
         cfg.seed_on_first_run = False
     if args.interval:
         cfg.poll_interval = args.interval
+    try:
+        duration = parse_duration(getattr(args, "duration", None))
+    except ValueError as exc:
+        log.error("%s", exc)
+        return 1
 
     with StateStore(cfg.state_db) as state:
         pipeline = _build_pipeline(cfg, state)
@@ -260,7 +372,7 @@ def cmd_run(cfg: Config, args) -> int:
             return 1
 
         state.prune()
-        runner = Runner(pipeline, cfg.poll_interval, cfg.poll_jitter)
+        runner = Runner(pipeline, cfg.poll_interval, cfg.poll_jitter, duration=duration)
         runner.install_signal_handlers()
         runner.run_forever()
     return 0
@@ -288,7 +400,18 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="notify about currently-visible content instead of silently recording it",
     )
+    p_run.add_argument(
+        "--duration",
+        help="stop cleanly after this long, e.g. 5h30m (default: run forever)",
+    )
     p_run.set_defaults(func=cmd_run)
+
+    p_quick = sub.add_parser(
+        "quickstart", help="set everything up and verify your phone (start here)"
+    )
+    p_quick.add_argument("--force", action="store_true", help="overwrite an existing .env")
+    p_quick.add_argument("--no-test", action="store_true", help="skip the test push")
+    p_quick.set_defaults(func=cmd_quickstart)
 
     p_once = sub.add_parser("once", help="run a single poll and exit (for cron)")
     p_once.add_argument("--no-seed", action="store_true")

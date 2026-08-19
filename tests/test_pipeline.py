@@ -295,3 +295,91 @@ class TestVisionIntegration:
         assert pipe.poll_once() == 1
         assert notifier.sent[0].click_url == "https://jobs.lever.co/figma/a"
         state.close()
+
+
+class TestFirstRunSeedingEdgeCases:
+    """Regression guards for a bug that made the watcher look dead.
+
+    The seed flag used to be set only when the first poll actually found
+    something. An account with no story currently up gives an empty first
+    poll, so the flag stayed unset — and the next genuinely new post was then
+    treated as first-run content and silently swallowed.
+    """
+
+    def test_empty_first_poll_still_arms_the_seed(self, cfg, notifier):
+        cfg.seed_on_first_run = True
+        pipe, state = build(cfg, notifier, posts=[], stories=[])
+
+        assert pipe.poll_once() == 0          # nothing up yet
+
+        pipe.source.posts.append(make_item(item_id="post:the-first-real-one"))
+        assert pipe.poll_once() == 1, "the first real post must be pushed, not seeded"
+        assert len(notifier.sent) == 1
+        state.close()
+
+    def test_a_totally_failed_first_poll_does_not_arm_the_seed(self, cfg, notifier):
+        """Otherwise a network blip at startup eats the next real post."""
+        cfg.seed_on_first_run = True
+        pipe, state = build(cfg, notifier, posts=[], stories=[])
+
+        def boom(*_a, **_k):
+            raise RuntimeError("instagram unreachable")
+
+        pipe.source.fetch_posts = boom
+        pipe.source.fetch_stories = boom
+        assert pipe.poll_once() == 0
+
+        # Instagram comes back, and there is already a post up.
+        pipe.source = FakeSource(posts=[make_item(item_id="post:existing")])
+        assert pipe.poll_once() == 0, "this poll is the real first one — it seeds"
+
+        pipe.source.posts.append(make_item(item_id="post:brand-new"))
+        assert pipe.poll_once() == 1
+        state.close()
+
+    def test_partial_failure_still_counts_as_reaching_instagram(self, cfg, notifier):
+        cfg.seed_on_first_run = True
+        pipe, state = build(cfg, notifier, posts=[make_item()], stories=[])
+
+        def boom(*_a, **_k):
+            raise RuntimeError("stories endpoint flaked")
+
+        pipe.source.fetch_stories = boom
+        assert pipe.poll_once() == 0          # seeds off the posts it did get
+        pipe.source.posts.append(make_item(item_id="post:after"))
+        assert pipe.poll_once() == 1
+        state.close()
+
+    def test_seeding_disabled_notifies_from_the_very_first_poll(self, cfg, notifier):
+        cfg.seed_on_first_run = False
+        pipe, state = build(cfg, notifier, posts=[make_item()])
+        assert pipe.poll_once() == 1
+        state.close()
+
+
+class TestCollect:
+    def test_reports_success_when_a_source_returns_nothing(self, cfg, notifier):
+        pipe, state = build(cfg, notifier, posts=[], stories=[])
+        items, ok = pipe._collect()
+        assert items == [] and ok is True
+        state.close()
+
+    def test_reports_failure_when_every_source_raises(self, cfg, notifier):
+        pipe, state = build(cfg, notifier)
+
+        def boom(*_a, **_k):
+            raise RuntimeError("down")
+
+        pipe.source.fetch_posts = boom
+        pipe.source.fetch_stories = boom
+        items, ok = pipe._collect()
+        assert items == [] and ok is False
+        state.close()
+
+    def test_reports_success_when_both_sources_are_switched_off(self, cfg, notifier):
+        cfg.check_posts = False
+        cfg.check_stories = False
+        pipe, state = build(cfg, notifier, posts=[make_item()])
+        items, ok = pipe._collect()
+        assert items == [] and ok is True
+        state.close()

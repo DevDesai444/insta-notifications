@@ -23,18 +23,26 @@ Do these in order. Step 3 proves your phone works before you touch Instagram.
 
 ---
 
-## 2. Make a throwaway Instagram account (3 min)
+## 2. Get an Instagram session cookie (2 min)
 
-You are deleting Instagram from your phone, but the *server* still needs an
-Instagram login, because **stories are invisible to logged-out visitors**.
+You're deleting Instagram from your phone, but the *watcher* still needs to be
+signed in, because **stories are invisible to logged-out visitors**.
 
-1. Create a new Instagram account (any browser). Do **not** use your main one.
-2. **Follow @zero2sudo** from it.
-3. Open the account a few times over a day or two if you can — brand-new
-   accounts that immediately start polling get flagged fastest.
+You don't need a new account and you don't need to store a password:
 
-> Use a throwaway account. Automated polling is against Instagram's terms of
-> service, and the account doing it can get restricted or disabled.
+1. On a desktop, log in to <https://www.instagram.com> in a browser.
+2. Open DevTools (**F12**) → **Application** → **Cookies** →
+   `https://www.instagram.com`.
+3. Copy the value of the **`sessionid`** cookie.
+
+The account you're logged in as must **follow @zero2sudo**.
+
+> Revoke it whenever you like: Instagram → Settings → Accounts Centre →
+> Password and security → **Where you're logged in** → log out that session.
+>
+> Automated polling is against Instagram's terms of service, and the account
+> doing it can get restricted. If that worries you, make a throwaway account,
+> follow @zero2sudo from it, and take the cookie from that instead.
 
 ---
 
@@ -48,19 +56,20 @@ cd insta-notifications
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-cp .env.example .env
+python -m insta_notify quickstart
 ```
 
-Edit `.env` and set, at minimum:
+`quickstart` writes a `.env` with a generated topic, walks you through the
+phone setup, and sends a test push.
+
+Then open `.env` and paste in your cookie from step 2:
 
 ```ini
-NTFY_TOPIC=zero2sudo-a7f3c91e4b     # the exact topic from step 1
-IG_USERNAME=your_burner_account
-IG_PASSWORD=your_burner_password
+IG_SESSIONID=71234567890%3AAbCdEf...
 ANTHROPIC_API_KEY=sk-ant-...        # optional but recommended — see below
 ```
 
-Now send yourself a test:
+To re-send the test at any point:
 
 ```bash
 python -m insta_notify selftest
@@ -95,11 +104,12 @@ Leave it running. That's it.
 | **Linux / Raspberry Pi**, no Docker | `deploy/insta-notify.service` (systemd) | Yes — ~60s |
 | **macOS**, always plugged in | `deploy/com.instanotify.watcher.plist` (launchd) | Yes — ~60s |
 | **Fly.io** (~$2/mo, nothing at home) | `fly deploy` — see `fly.toml` | Yes — ~60s |
-| **GitHub Actions**, nothing to run | enable `.github/workflows/poll.yml` | **No** — 5–15 min late |
+| **GitHub Actions**, nothing to run at all | see **[RUN_ON_GITHUB.md](RUN_ON_GITHUB.md)** | Yes — ~60s, with a short gap every 5.5h |
 
-A closed laptop sends no notifications. If you don't have a machine that stays
-on, Fly.io is the cheap option and GitHub Actions is the free one — but the
-free one is not real-time, and stories can expire before it looks.
+A closed laptop sends no notifications. **If you have no machine that stays
+on, use [RUN_ON_GITHUB.md](RUN_ON_GITHUB.md)** — your repo is public, so
+Actions minutes are free and unlimited, and the watcher runs there in ~5.5h
+shifts with no server of your own.
 
 ---
 
