@@ -337,6 +337,42 @@ GUIDE_URL = (
 )
 
 
+def _alert_auth_failure(cfg: Config, exc: Exception) -> None:
+    """Tell the phone when Instagram stops accepting our sign-in.
+
+    Session cookies expire, and passwords get challenged. Without this the
+    watcher just goes quiet and the first you'd know is noticing you haven't
+    heard about a role in a month.
+    """
+    how_to_fix = (
+        "Grab a fresh `sessionid` cookie:\n"
+        "1. Log in to instagram.com on a desktop\n"
+        "2. F12 → Application → Cookies → instagram.com\n"
+        "3. Copy `sessionid`\n"
+        "4. Tap below and update the IG_SESSIONID secret"
+        if cfg.ig_sessionid
+        else "Check the IG_USERNAME / IG_PASSWORD secrets, and whether "
+        "Instagram is asking that account for a security check."
+    )
+    note = Notification(
+        title="🔴 Instagram sign-in stopped working",
+        body=(
+            f"The @{cfg.target_username} watcher can no longer sign in, so it "
+            f"is not seeing new posts.\n\n{how_to_fix}\n\n"
+            f"Details: {str(exc)[:200]}"
+        ),
+        links=[SECRETS_URL, GUIDE_URL],
+        link_labels=["Update the secret", "Instructions"],
+        click_url=SECRETS_URL,
+        tags=["rotating_light"],
+        priority=5,
+    )
+    try:
+        build_notifier(cfg).send(note)
+    except Exception:  # a broken notifier must not mask the original error
+        log.exception("could not send the sign-in failure alert")
+
+
 def cmd_preflight(cfg: Config, args) -> int:
     """Check readiness, and push what's still missing to the phone.
 
@@ -398,6 +434,7 @@ def cmd_once(cfg: Config, args) -> int:
             state.set_meta(_TARGET_ID_KEY, pipeline.source.target_id)
         except Exception as exc:
             log.error("could not connect to Instagram: %s", exc)
+            _alert_auth_failure(cfg, exc)
             return 1
         sent = pipeline.poll_once()
         state.prune()
@@ -429,6 +466,7 @@ def cmd_run(cfg: Config, args) -> int:
         except Exception as exc:
             log.error("could not connect to Instagram: %s", exc)
             log.error("try `insta-notify login` first")
+            _alert_auth_failure(cfg, exc)
             return 1
 
         state.prune()

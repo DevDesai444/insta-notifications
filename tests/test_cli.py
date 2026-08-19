@@ -96,3 +96,46 @@ class _Recorder:
 
     def describe(self):
         return "recorder"
+
+
+class TestAuthFailureAlert:
+    """A silent watcher is worse than a broken one — expiry must be audible."""
+
+    def test_alert_names_the_cookie_when_using_a_session(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr(cli, "build_notifier", lambda c: _Recorder(sent))
+        cli._alert_auth_failure(
+            cfg_with(ig_sessionid="x" * 40), RuntimeError("login_required")
+        )
+        assert len(sent) == 1
+        note = sent[0]
+        assert "sessionid" in note.body
+        assert note.priority == 5, "this is urgent — nothing is being watched"
+        assert note.link_labels[0] == "Update the secret"
+        assert "login_required" in note.body, "the real cause should be visible"
+
+    def test_alert_points_at_credentials_when_using_a_password(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr(cli, "build_notifier", lambda c: _Recorder(sent))
+        cli._alert_auth_failure(
+            cfg_with(ig_username="u", ig_password="p"), RuntimeError("challenge")
+        )
+        assert "IG_USERNAME" in sent[0].body
+
+    def test_a_broken_notifier_does_not_raise(self, monkeypatch):
+        class Exploding:
+            def send(self, note):
+                raise RuntimeError("ntfy is down too")
+
+            def describe(self):
+                return "exploding"
+
+        monkeypatch.setattr(cli, "build_notifier", lambda c: Exploding())
+        # Must not raise: the caller is already handling a failure.
+        cli._alert_auth_failure(cfg_with(ig_sessionid="x" * 40), RuntimeError("boom"))
+
+    def test_long_error_text_is_truncated(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr(cli, "build_notifier", lambda c: _Recorder(sent))
+        cli._alert_auth_failure(cfg_with(ig_sessionid="x" * 40), RuntimeError("e" * 5000))
+        assert len(sent[0].body) < 1000
