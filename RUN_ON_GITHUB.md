@@ -97,6 +97,24 @@ branch does the same thing.
 
 ---
 
+## Optional: make it hand over to itself
+
+GitHub's scheduler is the weak link — see the note above. If you want each
+shift to start the next one directly instead of waiting for a cron:
+
+1. Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new)
+   scoped to **this repository only**, with **Actions: Read and write**.
+2. Save it as a repository secret named **`DISPATCH_TOKEN`**.
+
+Each shift then dispatches the next one as it finishes. Without the token the
+step prints a line and does nothing, and the crons remain the fallback.
+
+The built-in `GITHUB_TOKEN` cannot do this: GitHub deliberately refuses to
+start a workflow from an event raised with it, to stop workflows looping
+forever. That is why a separate token is needed.
+
+---
+
 ## How it stays running
 
 GitHub caps a single job at 6 hours, so:

@@ -175,3 +175,25 @@ jobs:
         with:
           path: data
           key: insta-state-${{ github.run_id }}
+
+      # Optional: hand straight over to the next shift instead of waiting for
+      # a cron. GitHub refuses to start a workflow from an event raised with
+      # the built-in GITHUB_TOKEN -- that is its recursion guard -- so this
+      # needs a separate token, and quietly does nothing without one.
+      #
+      # To enable: create a fine-grained PAT scoped to this repo with
+      # Actions: read and write, and save it as a secret named DISPATCH_TOKEN.
+      - name: Start the next shift
+        if: always() && steps.preflight.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "No DISPATCH_TOKEN — the next shift will be started by cron."
+            exit 0
+          fi
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/watch.yml/dispatches" \
+            -f "ref=${GITHUB_REF_NAME}" \
+            && echo "next shift dispatched" \
+            || echo "::warning::Could not dispatch the next shift; falling back to cron."
