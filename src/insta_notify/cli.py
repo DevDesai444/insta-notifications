@@ -328,6 +328,65 @@ def cmd_quickstart(cfg: Config, args) -> int:
     return 0
 
 
+SECRETS_URL = (
+    "https://github.com/DevDesai444/insta-notifications/settings/secrets/actions/new"
+)
+GUIDE_URL = (
+    "https://github.com/DevDesai444/insta-notifications/blob/"
+    "claude/instagram-newgrad-notifications-1nxoju/RUN_ON_GITHUB.md"
+)
+
+
+def cmd_preflight(cfg: Config, args) -> int:
+    """Check readiness, and push what's still missing to the phone.
+
+    The watcher can be fully deployed while still lacking the one thing only
+    a human can supply: an Instagram session. Rather than dying in a log
+    nobody reads, this puts the remaining step on the lock screen.
+
+    Exit codes: 0 ready, 2 waiting on the user, 1 misconfigured.
+    """
+    problems = cfg.validate()
+    blocking_notify = [
+        p for p in problems if "NTFY" in p or "PUSHOVER" in p or "BACKEND" in p
+    ]
+    if blocking_notify:
+        for p in blocking_notify:
+            log.error("config: %s", p)
+        return 1
+
+    if cfg.has_instagram_auth:
+        log.info("preflight OK — Instagram auth present, notifications configured")
+        return 0
+
+    log.warning("no Instagram credentials; notifying the phone and standing by")
+
+    if args.quiet:
+        return 2
+
+    notifier = build_notifier(cfg)
+    note = Notification(
+        title="⚙️ Almost there — 1 step left",
+        body=(
+            "Your @{target} watcher is deployed and running on GitHub.\n\n"
+            "It just needs to be signed in to Instagram (stories are invisible "
+            "to logged-out visitors).\n\n"
+            "On a desktop:\n"
+            "1. Log in to instagram.com\n"
+            "2. F12 → Application → Cookies → instagram.com\n"
+            "3. Copy the value of the `sessionid` cookie\n"
+            "4. Tap below, name the secret IG_SESSIONID, paste, save\n\n"
+            "Notifications start within ~5 minutes of saving it."
+        ).format(target=cfg.target_username),
+        links=[SECRETS_URL, GUIDE_URL],
+        click_url=SECRETS_URL,
+        tags=["gear"],
+        priority=4,
+    )
+    notifier.send(note)
+    return 2
+
+
 def cmd_once(cfg: Config, args) -> int:
     if args.no_seed:
         cfg.seed_on_first_run = False
@@ -412,6 +471,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_quick.add_argument("--force", action="store_true", help="overwrite an existing .env")
     p_quick.add_argument("--no-test", action="store_true", help="skip the test push")
     p_quick.set_defaults(func=cmd_quickstart)
+
+    p_pre = sub.add_parser(
+        "preflight",
+        help="check readiness; push the remaining setup step to your phone",
+    )
+    p_pre.add_argument(
+        "--quiet", action="store_true", help="don't send the reminder notification"
+    )
+    p_pre.set_defaults(func=cmd_preflight)
 
     p_once = sub.add_parser("once", help="run a single poll and exit (for cron)")
     p_once.add_argument("--no-seed", action="store_true")

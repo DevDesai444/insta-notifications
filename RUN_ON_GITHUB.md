@@ -7,17 +7,25 @@ Total setup: about 5 minutes, all in the browser.
 
 ---
 
-## 1. Pick your ntfy topic
+## 1. Subscribe on your iPhone
 
-Install **ntfy** from the App Store, open it, allow notifications, tap **+**,
-and subscribe to a long unguessable name:
+A topic has already been generated and wired in, so there is nothing to
+configure. Install **ntfy** from the App Store, open it, allow notifications,
+tap **+**, and subscribe to:
 
 ```
-zero2sudo-a7f3c91e4b
+zero2sudo-f5bf63a219
 ```
+
+Or just open <https://ntfy.sh/zero2sudo-f5bf63a219> on the phone.
 
 In **iOS Settings → Notifications → ntfy**, turn **off Scheduled Summary**.
 Leaving it on batches notifications and would delay them by hours.
+
+> This repo is public, so that topic name is public too — anyone who reads it
+> could push to your phone. The content is public Instagram posts either way,
+> but if you want it locked down, add a repository secret named `NTFY_TOPIC`
+> with a private name of your own. It overrides the built-in default.
 
 ---
 
@@ -41,31 +49,43 @@ The account you're logged in as must **follow @zero2sudo**.
 
 ---
 
-## 3. Add three repository secrets
+## 3. Add one repository secret
 
-Go to **Settings → Secrets and variables → Actions → New repository secret**
-in this repo, and add:
+[**Click here to add it**](https://github.com/DevDesai444/insta-notifications/settings/secrets/actions/new)
+— or go to **Settings → Secrets and variables → Actions → New repository
+secret**.
 
 | Name | Value |
 |---|---|
-| `NTFY_TOPIC` | the topic from step 1 |
 | `IG_SESSIONID` | the cookie from step 2 |
-| `ANTHROPIC_API_KEY` | *optional* — enables reading links out of screenshots |
 
-Secrets are encrypted and are never shown in logs, even though the repo is
+Optional extras, same place:
+
+| Name | Value |
+|---|---|
+| `ANTHROPIC_API_KEY` | enables reading links out of screenshots |
+| `NTFY_TOPIC` | a private topic name, overriding the public default |
+
+Secrets are encrypted and never appear in logs, even though the repo is
 public.
 
 ---
 
-## 4. Turn it on
+## 4. Nothing — it's already running
 
-**Actions** tab → **watch instagram** → **Run workflow** → **Run workflow**.
+The watcher is deployed and its schedule is live. It polls every 5 minutes to
+see whether a shift should start, and starts watching the moment
+`IG_SESSIONID` exists.
 
-That's it. You should start getting notifications within a minute or two of
-@zero2sudo posting.
+Until then it pushes a reminder to your phone every few hours with a direct
+link to the form above. **If you got a notification saying "Almost there — 1
+step left", the whole delivery chain already works** — the only missing piece
+is that cookie.
 
-To confirm it's alive, open the running job — it logs a line per poll at
-debug level and a line whenever it notifies.
+Once the secret is saved, notifications begin within about 5 minutes.
+
+To watch it happen: **Actions** tab → **watch instagram** → open the running
+job.
 
 ---
 

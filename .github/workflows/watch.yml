@@ -1,16 +1,18 @@
-# 24/7 watcher running on GitHub's free runners — no machine of your own.
+# 24/7 watcher on GitHub's free runners — no machine of your own.
+#
+# STATUS: deployed and running. The only thing it still needs is an Instagram
+# session, which only you can supply. Until it has one, every few hours it
+# pushes a reminder to your phone with a direct link to the form.
+#
+#   Add secret IG_SESSIONID  ->  https://github.com/DevDesai444/insta-notifications/settings/secrets/actions/new
+#   Full instructions        ->  RUN_ON_GITHUB.md
 #
 # How it stays up without a server:
-#   * A job here can run up to 6 hours, so each run polls for 5h30m.
-#   * A cron fires every 5 minutes. If a run is already going, the new one
-#     exits in ~15 seconds. If none is going, it starts the next 5h30m shift.
-#   * State (what's already been notified, plus the Instagram session) rides
-#     between runs in the Actions cache.
-#
-# Setup is in RUN_ON_GITHUB.md. You need two repository secrets:
-#   NTFY_TOPIC     your private ntfy topic
-#   IG_SESSIONID   the `sessionid` cookie from a logged-in browser
-# and optionally ANTHROPIC_API_KEY to read links out of screenshots.
+#   * A job can run up to 6 hours, so each shift watches for 5h30m.
+#   * A cron fires every 5 minutes. If a shift is already running, that run
+#     exits in ~15s. If none is, it starts the next shift.
+#   * The dedup database and Instagram session ride between shifts in the
+#     Actions cache, so you never get repeat notifications.
 
 name: watch instagram
 
@@ -18,22 +20,28 @@ on:
   workflow_dispatch:
     inputs:
       duration:
-        description: "How long this run should watch for"
+        description: "How long this shift should watch for"
         default: "5h30m"
         required: false
   schedule:
-    # Every 5 minutes. Almost all of these exit immediately because a shift
-    # is already running; they exist to start the next one promptly.
     - cron: "*/5 * * * *"
 
 permissions:
   actions: read
   contents: read
 
+env:
+  # A topic was generated for you so there is nothing to configure to start
+  # receiving. Subscribe to it in the ntfy iOS app.
+  #
+  # This repo is public, so this topic name is public: anyone who reads it
+  # could publish to your phone. To lock it down, add a repository secret
+  # named NTFY_TOPIC with a new private name — it overrides this default.
+  DEFAULT_NTFY_TOPIC: zero2sudo-f5bf63a219
+
 jobs:
   watch:
     runs-on: ubuntu-latest
-    # 5h30m of watching, plus room for setup and the cache save.
     timeout-minutes: 350
 
     steps:
@@ -46,8 +54,8 @@ jobs:
           running=$(gh api \
             "repos/${GITHUB_REPOSITORY}/actions/workflows/watch.yml/runs?status=in_progress&per_page=100" \
             --jq '[.workflow_runs[].id] | length')
-          echo "in-progress runs (including this one): $running"
-          # This run counts itself, so >1 means somebody else is already on shift.
+          echo "in-progress runs (this one included): $running"
+          # This run counts itself, so >1 means someone else is already on shift.
           if [ "$running" -gt 1 ]; then
             echo "another shift is active — nothing to do"
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -68,18 +76,11 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         run: pip install -r requirements.txt
 
-      # Carries the dedup database and Instagram session between shifts.
-      # Without it every shift would re-notify and re-login.
-      - name: Restore state
-        if: steps.guard.outputs.skip != 'true'
-        uses: actions/cache/restore@v4
-        with:
-          path: data
-          key: insta-state-${{ github.run_id }}
-          restore-keys: |
-            insta-state-
-
-      - name: Watch
+      # Is an Instagram session configured yet? If not, nudge the phone with
+      # the remaining step rather than failing into a log nobody reads.
+      # Rate limited to roughly every 6 hours, plus once on a manual run.
+      - name: Preflight
+        id: preflight
         if: steps.guard.outputs.skip != 'true'
         env:
           PYTHONPATH: src
@@ -89,16 +90,56 @@ jobs:
           IG_USERNAME: ${{ secrets.IG_USERNAME }}
           IG_PASSWORD: ${{ secrets.IG_PASSWORD }}
           NOTIFY_BACKEND: ntfy
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC || env.DEFAULT_NTFY_TOPIC }}
+        run: |
+          set +e
+          hour=$(date -u +%-H); minute=$(date -u +%-M)
+          quiet="--quiet"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            quiet=""
+          elif [ $((hour % 6)) -eq 0 ] && [ "$minute" -lt 5 ]; then
+            quiet=""
+          fi
+          python -m insta_notify preflight $quiet
+          code=$?
+          if [ "$code" -eq 2 ]; then
+            echo "::warning::Waiting on IG_SESSIONID. Add it at Settings > Secrets and variables > Actions."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [ "$code" -ne 0 ] && exit "$code"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      # Carries the dedup database and Instagram session between shifts.
+      - name: Restore state
+        if: steps.preflight.outputs.ready == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: insta-state-${{ github.run_id }}
+          restore-keys: |
+            insta-state-
+
+      - name: Watch
+        if: steps.preflight.outputs.ready == 'true'
+        env:
+          PYTHONPATH: src
+          DATA_DIR: data
+          IG_TARGET_USERNAME: zero2sudo
+          IG_SESSIONID: ${{ secrets.IG_SESSIONID }}
+          IG_USERNAME: ${{ secrets.IG_USERNAME }}
+          IG_PASSWORD: ${{ secrets.IG_PASSWORD }}
+          IG_TOTP_SEED: ${{ secrets.IG_TOTP_SEED }}
+          NOTIFY_BACKEND: ntfy
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC || env.DEFAULT_NTFY_TOPIC }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           POLL_INTERVAL_SECONDS: "60"
           NOTIFY_ALL: "true"
-        run: |
-          python -m insta_notify run --duration "${{ inputs.duration || '5h30m' }}"
+        run: python -m insta_notify run --duration "${{ inputs.duration || '5h30m' }}"
 
       # `always()` so a cancelled or timed-out shift still hands its state on.
       - name: Save state
-        if: always() && steps.guard.outputs.skip != 'true'
+        if: always() && steps.preflight.outputs.ready == 'true'
         uses: actions/cache/save@v4
         with:
           path: data
