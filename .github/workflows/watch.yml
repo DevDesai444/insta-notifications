@@ -24,7 +24,13 @@ on:
         default: "5h30m"
         required: false
   schedule:
+    # Primary: check every 5 minutes whether a shift needs starting.
     - cron: "*/5 * * * *"
+    # Backstop. GitHub deprioritises high-frequency crons under load and can
+    # drop them outright, which would leave no shift running. This second
+    # entry is far more likely to survive; the odd minute avoids the
+    # on-the-hour stampede that makes :00 the worst slot to ask for.
+    - cron: "23 * * * *"
 
 permissions:
   actions: read
