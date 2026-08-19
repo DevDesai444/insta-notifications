@@ -210,10 +210,12 @@ and device profile (those last ones skip if instagrapi isn't installed).
   to them. The topic wired into the GitHub workflow is committed to a public
   repo, so treat it as known. Set a `NTFY_TOPIC` secret to a private name to
   close that, or `NTFY_TOKEN` with an access-controlled topic.
-- **GitHub's scheduler is slow to wake up and loose afterwards.** Measured on
-  this repo: the first scheduled run landed ~38 minutes after the workflow
-  was created, and `*/5` firings then arrived 2–3 minutes late. It does work,
-  so shifts restart on their own — but a freshly added schedule is not
-  something to sit and wait on. A push starts a shift immediately, and
-  `DISPATCH_TOKEN` (see RUN_ON_GITHUB.md) makes hand-off direct. The daily
-  heartbeat is there so you find out if none of that is working.
+- **Treat the cron as best-effort.** What was actually observed on this repo:
+  in ~50 minutes the `*/5` schedule fired **once**, about 38 minutes after
+  the workflow was created, and had not settled into a cadence by the time
+  this was written. GitHub documents that high-frequency schedules are
+  deprioritised and can be dropped under load, which matches. So don't rely
+  on the cron alone: a push always starts a shift immediately, and
+  `DISPATCH_TOKEN` (see RUN_ON_GITHUB.md) makes each shift start the next one
+  directly. The daily heartbeat is there so that if all of it stalls, you
+  find out from your phone rather than from a job you never heard about.

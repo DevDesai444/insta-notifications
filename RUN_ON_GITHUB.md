@@ -85,10 +85,10 @@ Once the secret is saved, the next firing starts a real 5h30m watch shift.
 
 ### If nothing happens within ~15 minutes of saving the secret
 
-GitHub's scheduler takes its time. Measured on this repo: the first scheduled
-run arrived **38 minutes** after the workflow was created, and `*/5` firings
-then ran 2–3 minutes late. It does work — it just isn't prompt, and it is not
-worth sitting and watching. Give it a nudge by hand:
+GitHub's scheduler is best-effort. What was actually observed here: in ~50
+minutes the schedule fired **once**, about 38 minutes after the workflow was
+created. GitHub deprioritises high-frequency crons and drops them under load.
+So don't sit and watch it — give it a nudge by hand:
 
 **Actions** tab → **watch instagram** → **Run workflow** → **Run workflow**.
 
@@ -100,9 +100,9 @@ branch does the same thing.
 
 ## Optional: make it hand over to itself
 
-The crons do work, so this is a refinement rather than a fix. It removes the
-few-minute gap at each shift changeover, and the risk of a firing being
-dropped under load. If you want each shift to start the next one directly:
+Given how thin the cron turned out to be, this is the setting worth having.
+It removes the changeover gap and the risk of a dropped firing entirely, by
+making each shift start the next one itself. To enable it:
 
 1. Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new)
    scoped to **this repository only**, with **Actions: Read and write**.
@@ -128,9 +128,10 @@ GitHub caps a single job at 6 hours, so:
   cache, so you never get repeat notifications and it doesn't re-login
   constantly.
 
-Expect a **gap of a few minutes every 5.5 hours** at shift changeover —
-measured firings ran 2–3 minutes behind schedule, and GitHub warns they can
-be dropped entirely under load, so occasionally it will be longer. If a story goes up during that
+Expect a **gap at each 5.5-hour changeover** whose length depends entirely on
+when the cron next fires — which, per the observation above, is not
+dependable. Setting `DISPATCH_TOKEN` removes that gap; without it, the daily
+heartbeat is your signal that something stalled. If a story goes up during that
 window and expires before the next shift starts, it's missed. Everything else
 arrives within ~60 seconds.
 
