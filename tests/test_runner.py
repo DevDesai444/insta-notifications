@@ -1,6 +1,6 @@
 import pytest
 
-from insta_notify.runner import MAX_BACKOFF, Runner, parse_duration
+from insta_notify.runner import MAX_BACKOFF, MIN_DELAY, Runner, parse_duration
 
 
 class DummyPipeline:
@@ -137,3 +137,21 @@ class TestDurationStopsTheLoop:
         r.pipeline.poll_once()
         delay = min(r.next_delay(), r._deadline - time.monotonic())
         assert delay <= 2, "would have slept 60s past a 2s deadline"
+
+
+class TestDelayFloor:
+    """The floor is a safety net, not a surprise. Pin what it does."""
+
+    def test_heavy_jitter_can_never_produce_a_hammering_delay(self):
+        r = Runner(DummyPipeline([]), interval=20, jitter=0.9)
+        assert min(r.next_delay() for _ in range(500)) >= MIN_DELAY
+
+    def test_the_floor_does_not_distort_a_realistic_interval(self):
+        r = Runner(DummyPipeline([]), interval=60, jitter=0)
+        assert r.next_delay() == 60
+
+    def test_the_20s_interval_clamp_keeps_the_floor_out_of_the_way(self):
+        """With no jitter the floor is unreachable, because interval >= 20."""
+        r = Runner(DummyPipeline([]), interval=1, jitter=0)
+        assert r.interval == 20
+        assert r.next_delay() == 20

@@ -21,6 +21,11 @@ log = logging.getLogger(__name__)
 
 MAX_BACKOFF = 900  # 15 minutes
 
+# Absolute floor on the gap between two polls. `interval` is already clamped
+# to 20s, so this only bites when heavy jitter would otherwise dip a delay
+# near zero — never let that turn into hammering Instagram.
+MIN_DELAY = 5.0
+
 _DURATION_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([smhd])", re.IGNORECASE)
 _UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
@@ -88,7 +93,7 @@ class Runner:
         else:
             backoff = self.interval
         spread = backoff * self.jitter
-        return max(5.0, backoff + random.uniform(-spread, spread))
+        return max(MIN_DELAY, backoff + random.uniform(-spread, spread))
 
     def run_forever(self) -> None:
         if self.duration:
