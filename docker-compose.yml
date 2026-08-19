@@ -1,0 +1,14 @@
+services:
+  insta-notify:
+    build: .
+    container_name: insta-notify
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+    volumes:
+      - insta-notify-data:/data
+    command: ["run"]
+
+volumes:
+  insta-notify-data:

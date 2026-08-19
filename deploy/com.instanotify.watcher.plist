@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS background service. Keeps running while the Mac is awake and
+  restarts itself on crash or reboot.
+
+    cp deploy/com.instanotify.watcher.plist ~/Library/LaunchAgents/
+    # edit the paths below to match your machine, then:
+    launchctl load  ~/Library/LaunchAgents/com.instanotify.watcher.plist
+    launchctl start com.instanotify.watcher
+    tail -f /tmp/insta-notify.log
+
+  To stop:
+    launchctl unload ~/Library/LaunchAgents/com.instanotify.watcher.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.instanotify.watcher</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/YOU/insta-notifications/.venv/bin/python</string>
+        <string>-m</string>
+        <string>insta_notify</string>
+        <string>run</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/YOU/insta-notifications</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/insta-notify.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/insta-notify.log</string>
+</dict>
+</plist>

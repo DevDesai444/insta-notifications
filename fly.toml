@@ -1,0 +1,30 @@
+# Deploy the watcher as an always-on Fly.io machine.
+#
+#   fly launch --no-deploy --copy-config
+#   fly volumes create insta_data --size 1
+#   fly secrets set IG_USERNAME=... IG_PASSWORD=... NTFY_TOPIC=... ANTHROPIC_API_KEY=...
+#   fly deploy
+#
+# The volume matters: it holds the Instagram session and the dedup database.
+
+app = "insta-notify"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  DATA_DIR = "/data"
+  IG_TARGET_USERNAME = "zero2sudo"
+  POLL_INTERVAL_SECONDS = "60"
+  NOTIFY_BACKEND = "ntfy"
+
+[mounts]
+  source = "insta_data"
+  destination = "/data"
+
+# No HTTP service — this is a worker. auto_stop must stay off so it keeps
+# polling; a stopped machine sends no notifications.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

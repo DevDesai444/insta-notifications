@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "insta-notify"
+version = "1.0.0"
+description = "Real-time iPhone push notifications for a watched Instagram account's posts and stories, with tap-to-open job links."
+requires-python = ">=3.10"
+dependencies = [
+    "instagrapi>=2.1.2",
+    "pillow>=10.0.0",
+    "requests>=2.31.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+llm = ["anthropic>=0.40.0"]
+dev = ["pytest>=8.0.0"]
+
+[project.scripts]
+insta-notify = "insta_notify.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

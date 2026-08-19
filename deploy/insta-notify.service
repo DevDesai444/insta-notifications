@@ -1,0 +1,33 @@
+# Linux / Raspberry Pi service.
+#
+#   sudo cp deploy/insta-notify.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now insta-notify
+#   journalctl -u insta-notify -f
+#
+# Adjust User= and the two paths to match your machine.
+
+[Unit]
+Description=Instagram new-grad role notifier
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/insta-notifications
+ExecStart=/home/pi/insta-notifications/.venv/bin/python -m insta_notify run
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+# Basic hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/pi/insta-notifications/data
+
+[Install]
+WantedBy=multi-user.target

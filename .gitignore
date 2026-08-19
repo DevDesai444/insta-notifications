@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Secrets and runtime state — never commit
+.env
+data/
+*.session.json
+session.json
+state.db
