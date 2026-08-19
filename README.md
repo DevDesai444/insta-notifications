@@ -190,7 +190,10 @@ and device profile (those last ones skip if instagrapi isn't installed).
 
 - **This is against Instagram's terms of service.** Automated reading of
   another account's content can get the account doing it restricted or
-  disabled. Use a throwaway account; don't use your real one.
+  disabled. The convenient path — a session cookie from the account you
+  already use — puts *that* account at risk, which is a real trade you should
+  make knowingly. A throwaway account that follows the target moves the risk
+  somewhere you don't care about, at the cost of setting one up.
 - **Not truly push.** Median delay is about half your poll interval, so ~30s
   by default. A story posted and deleted inside a minute can be missed.
 - **Video stories** are analysed from their cover frame only. A link that
@@ -203,5 +206,11 @@ and device profile (those last ones skip if instagrapi isn't installed).
   you self-host ntfy, you must set `upstream-base-url: https://ntfy.sh` in its
   config or **iOS notifications will not arrive instantly** — self-hosted
   servers have no APNs connection of their own.
-- **Anyone who knows your ntfy topic can read your notifications.** Use a long
-  random topic name, or set `NTFY_TOKEN` with an access-controlled topic.
+- **Anyone who knows your ntfy topic can read your notifications** — and push
+  to them. The topic wired into the GitHub workflow is committed to a public
+  repo, so treat it as known. Set a `NTFY_TOPIC` secret to a private name to
+  close that, or `NTFY_TOKEN` with an access-controlled topic.
+- **GitHub's scheduler is not dependable.** During this build it did not fire
+  a `*/5` cron once in 40 minutes. A push always starts a shift; for reliable
+  hand-off between shifts, set `DISPATCH_TOKEN` (see RUN_ON_GITHUB.md). The
+  daily heartbeat exists so you find out if none of that is working.
