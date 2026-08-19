@@ -23,6 +23,12 @@ on:
         description: "How long this shift should watch for"
         default: "5h30m"
         required: false
+  # A push starts a shift immediately. GitHub's scheduler can take a long
+  # while to pick up a newly added cron -- and can drop firings entirely --
+  # so this is the one trigger that reliably gets things moving right now.
+  # The in-progress guard means a push during an active shift costs ~10s.
+  push:
+    branches: [claude/instagram-newgrad-notifications-1nxoju]
   schedule:
     # Primary: check every 5 minutes whether a shift needs starting.
     - cron: "*/5 * * * *"
