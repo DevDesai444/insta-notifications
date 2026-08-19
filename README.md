@@ -161,6 +161,7 @@ annotated list. The ones that matter most:
 | `NOTIFY_ALL` | `true` | `false` = only posts with a link or a keyword hit |
 | `DATA_DIR` | `data` | Session + dedup DB. **Must persist**, or you'll get repeats |
 | `SEED_ON_FIRST_RUN` | `true` | First poll records existing content silently |
+| `HEARTBEAT_HOURS` | `24` | Quiet "still alive" ping, so silence isn't ambiguous. `0` disables |
 
 `NOTIFY_ALL=true` is the default on purpose. The chat-screenshot posts about
 new grad roles often have an empty or unrelated caption, so keyword filtering
@@ -172,7 +173,7 @@ would drop exactly the ones worth seeing.
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest -q          # 109 tests
+python -m pytest -q          # 140 tests
 python -m insta_notify demo  # end-to-end with the console backend
 ```
 

@@ -383,3 +383,89 @@ class TestCollect:
         items, ok = pipe._collect()
         assert items == [] and ok is True
         state.close()
+
+
+class TestHeartbeat:
+    """Without this, a dead watcher and a quiet account look identical."""
+
+    def test_first_poll_records_the_baseline_without_pinging(self, cfg, notifier):
+        cfg.heartbeat_hours = 24
+        pipe, state = build(cfg, notifier, posts=[])
+        pipe.poll_once()
+        assert notifier.sent == [], "don't ping the moment it starts"
+        assert state.get_meta("last_heartbeat") != ""
+        state.close()
+
+    def test_pings_once_the_interval_has_elapsed(self, cfg, notifier):
+        import time
+
+        cfg.heartbeat_hours = 24
+        pipe, state = build(cfg, notifier, posts=[])
+        pipe.poll_once()
+        state.set_meta("last_heartbeat", str(time.time() - 25 * 3600))
+
+        pipe.poll_once()
+        assert len(notifier.sent) == 1
+        note = notifier.sent[0]
+        assert "Still watching" in note.title
+        assert note.priority == 1, "a heartbeat must not buzz the phone"
+        state.close()
+
+    def test_does_not_ping_again_until_the_next_interval(self, cfg, notifier):
+        import time
+
+        cfg.heartbeat_hours = 24
+        pipe, state = build(cfg, notifier, posts=[])
+        pipe.poll_once()
+        state.set_meta("last_heartbeat", str(time.time() - 25 * 3600))
+        pipe.poll_once()
+        pipe.poll_once()
+        pipe.poll_once()
+        assert len(notifier.sent) == 1
+        state.close()
+
+    def test_zero_disables_it(self, cfg, notifier):
+        import time
+
+        cfg.heartbeat_hours = 0
+        pipe, state = build(cfg, notifier, posts=[])
+        pipe.poll_once()
+        state.set_meta("last_heartbeat", str(time.time() - 1000 * 3600))
+        pipe.poll_once()
+        assert notifier.sent == []
+        state.close()
+
+    def test_a_failed_heartbeat_send_is_retried(self, cfg):
+        import time
+
+        from conftest import RecordingNotifier
+
+        cfg.heartbeat_hours = 24
+        failing = RecordingNotifier(succeed=False)
+        pipe, state = build(cfg, failing, posts=[])
+        pipe.poll_once()
+        stale = str(time.time() - 25 * 3600)
+        state.set_meta("last_heartbeat", stale)
+
+        pipe.poll_once()
+        assert state.get_meta("last_heartbeat") == stale, "unsent means not recorded"
+
+        pipe.notifier = RecordingNotifier(succeed=True)
+        pipe.poll_once()
+        assert len(pipe.notifier.sent) == 1
+        state.close()
+
+    def test_a_real_post_still_gets_through_alongside_a_heartbeat(self, cfg, notifier):
+        import time
+
+        cfg.heartbeat_hours = 24
+        pipe, state = build(cfg, notifier, posts=[])
+        pipe.poll_once()
+        state.set_meta("last_heartbeat", str(time.time() - 25 * 3600))
+
+        pipe.source.posts.append(make_item(caption="https://jobs.lever.co/figma/a"))
+        assert pipe.poll_once() == 1
+        titles = [n.title for n in notifier.sent]
+        assert any("Still watching" in t for t in titles)
+        assert any("Figma" in t for t in titles)
+        state.close()

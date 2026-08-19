@@ -88,6 +88,12 @@ class Config:
     notify_all: bool = True
     keywords: tuple[str, ...] = ()
 
+    # Send a quiet "still alive" ping this often. The watcher can die in ways
+    # that produce no notification at all -- a shift ends and no cron restarts
+    # it -- and without a heartbeat the silence is indistinguishable from
+    # "he hasn't posted". 0 disables.
+    heartbeat_hours: int = 24
+
     # --- storage ------------------------------------------------------
     data_dir: Path = field(default_factory=lambda: Path("data"))
 
@@ -158,6 +164,7 @@ class Config:
             notify_all=_bool("NOTIFY_ALL", True),
             keywords=keywords,
             max_item_age_hours=_int("MAX_ITEM_AGE_HOURS", 48),
+            heartbeat_hours=_int("HEARTBEAT_HOURS", 24),
             data_dir=Path(os.getenv("DATA_DIR", "data")),
             seed_on_first_run=_bool("SEED_ON_FIRST_RUN", True),
         )

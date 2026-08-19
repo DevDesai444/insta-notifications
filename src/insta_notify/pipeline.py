@@ -8,6 +8,7 @@ itself, and push a notification whose tap target is the job link.
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 
 from .config import Config
@@ -30,6 +31,7 @@ from .state import StateStore
 log = logging.getLogger(__name__)
 
 _SEEDED_KEY = "seeded"
+_HEARTBEAT_KEY = "last_heartbeat"
 _TARGET_ID_KEY = "target_user_id"
 
 
@@ -90,6 +92,8 @@ class Pipeline:
             )
             return 0
 
+        self._maybe_heartbeat()
+
         if not fresh:
             return 0
 
@@ -106,6 +110,41 @@ class Pipeline:
                 continue
         media_utils.cleanup(self.cfg.media_dir)
         return sent
+
+    def _maybe_heartbeat(self) -> None:
+        """Prove the watcher is alive, so silence means 'he hasn't posted'."""
+        if not self.cfg.heartbeat_hours:
+            return
+
+        now = time.time()
+        try:
+            last = float(self.state.get_meta(_HEARTBEAT_KEY, "0") or 0)
+        except ValueError:
+            last = 0.0
+
+        if last == 0.0:
+            # Don't ping the instant it starts; wait out a full interval first.
+            self.state.set_meta(_HEARTBEAT_KEY, str(now))
+            return
+
+        if now - last < self.cfg.heartbeat_hours * 3600:
+            return
+
+        hours = (now - last) / 3600
+        note = Notification(
+            title=f"💚 Still watching @{self.cfg.target_username}",
+            body=(
+                f"No new posts in the last {hours:.0f}h — that's him being "
+                f"quiet, not this being broken.\n\n"
+                f"{self.state.count()} item(s) seen since setup."
+            ),
+            links=[],
+            click_url=f"https://www.instagram.com/{self.cfg.target_username}/",
+            tags=["green_heart"],
+            priority=1,  # min: shows in the app, no sound, no banner
+        )
+        if self.notifier.send(note):
+            self.state.set_meta(_HEARTBEAT_KEY, str(now))
 
     def _collect(self) -> tuple[list[Item], bool]:
         """Everything currently visible, plus whether we heard from Instagram.
