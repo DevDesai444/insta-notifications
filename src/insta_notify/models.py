@@ -76,6 +76,9 @@ class Notification:
     title: str
     body: str
     links: list[str] = field(default_factory=list)
+    # Optional button captions, positionally matched to `links`. Left empty,
+    # each button is captioned from its own URL.
+    link_labels: list[str] = field(default_factory=list)
     click_url: str = ""            # what opens when the notification is tapped
     image_url: str = ""            # remote image, attached by URL (ntfy)
     image_path: str = ""           # local file, uploaded as multipart (Pushover)

@@ -63,11 +63,12 @@ class NtfyNotifier(Notifier):
             payload["click"] = note.click_url
 
         actions = []
-        for link in note.links[:MAX_ACTIONS]:
+        for i, link in enumerate(note.links[:MAX_ACTIONS]):
+            explicit = note.link_labels[i] if i < len(note.link_labels) else ""
             actions.append(
                 {
                     "action": "view",
-                    "label": _button_label(link),
+                    "label": (explicit or _button_label(link))[:28],
                     "url": link,
                     "clear": False,
                 }
@@ -105,6 +106,8 @@ class NtfyNotifier(Notifier):
 
 def _button_label(url: str) -> str:
     """Short, human label for an action button (ntfy shows very little text)."""
+    from urllib.parse import urlparse
+
     from ..extract.urls import guess_company, job_platform
 
     platform = job_platform(url)
@@ -113,6 +116,17 @@ def _button_label(url: str) -> str:
         return f"{company} ({platform})"[:28]
     if platform:
         return f"Open {platform}"[:28]
+
+    # Two links on the same host would otherwise get identical captions, so
+    # fall back to the last meaningful path segment to tell them apart.
+    try:
+        segments = [s for s in urlparse(url).path.split("/") if s]
+    except ValueError:
+        segments = []
+    if segments:
+        tail = segments[-1].rsplit(".", 1)[0].replace("-", " ").replace("_", " ")
+        if tail and not tail.isdigit():
+            return tail.title()[:28]
     if company:
         return f"Open {company}"[:28]
     return "Open link"

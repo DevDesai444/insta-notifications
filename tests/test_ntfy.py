@@ -69,3 +69,38 @@ def test_long_fields_are_truncated_not_rejected():
     p = NtfyNotifier(topic="t")._payload(build(title="x" * 500, body="y" * 9000))
     assert len(p["title"]) <= 250
     assert len(p["message"]) <= 3800
+
+
+class TestButtonLabels:
+    def test_explicit_labels_win(self):
+        p = NtfyNotifier(topic="t")._payload(
+            build(
+                links=["https://github.com/a/b/settings", "https://github.com/a/b/docs"],
+                link_labels=["Add the secret", "Instructions"],
+            )
+        )
+        assert [a["label"] for a in p["actions"]] == ["Add the secret", "Instructions"]
+
+    def test_two_links_on_one_host_get_distinct_captions(self):
+        """Both used to render as 'Open Github', which tells you nothing."""
+        p = NtfyNotifier(topic="t")._payload(
+            build(links=["https://github.com/o/r/settings", "https://github.com/o/r/guide"])
+        )
+        labels = [a["label"] for a in p["actions"]]
+        assert len(set(labels)) == 2, labels
+
+    def test_partial_labels_fall_back_per_button(self):
+        p = NtfyNotifier(topic="t")._payload(
+            build(
+                links=["https://a.com/x", "https://nvidia.wd5.myworkdayjobs.com/e/job/y"],
+                link_labels=["First"],
+            )
+        )
+        assert p["actions"][0]["label"] == "First"
+        assert p["actions"][1]["label"] == "Nvidia (Workday)"
+
+    def test_labels_are_truncated(self):
+        p = NtfyNotifier(topic="t")._payload(
+            build(links=["https://a.com/x"], link_labels=["y" * 100])
+        )
+        assert len(p["actions"][0]["label"]) <= 28

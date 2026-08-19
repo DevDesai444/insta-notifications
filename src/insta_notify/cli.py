@@ -379,6 +379,7 @@ def cmd_preflight(cfg: Config, args) -> int:
             "Notifications start within ~5 minutes of saving it."
         ).format(target=cfg.target_username),
         links=[SECRETS_URL, GUIDE_URL],
+        link_labels=["Add the secret", "Instructions"],
         click_url=SECRETS_URL,
         tags=["gear"],
         priority=4,
